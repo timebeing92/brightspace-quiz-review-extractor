@@ -1,0 +1,22 @@
+# Local environments
+.venv/
+venv/
+
+# Python caches and test artifacts
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.py[cod]
+
+# Local generated outputs
+dist/
+quiz_review_out*/
+quiz_review_example_v2/
+Sample_extracted_export_files/
+
+# Editor and OS noise
+.DS_Store
+*.code-workspace
+.vscode/
+
