@@ -1,12 +1,30 @@
-# Brightspace Quiz Review Extractor v2
+# Brightspace Quiz Review Extractor
 
-This project turns a Brightspace course export into three **review-first artifacts**:
+Turn Brightspace quiz export XML into reviewable Excel, JSON, and Markdown—with clear traceability back to the source.
 
-- `quiz_review.xlsx`
-- `quiz_review.json`
-- `quiz_review_summary.md`
+## Why This Exists
 
-It is built for audit and human review. It does **not** try to rebuild importable Brightspace quizzes.
+Brightspace quiz exports are distributed across multiple XML files and are difficult to review in their raw form. Questions, feedback, pools, and banked content are often split across quiz files and `questiondb.xml`, with relationships that are not always explicit or stable.
+
+This tool restructures that data into reviewer-friendly outputs while preserving traceability back to the original export. Ambiguities are surfaced as diagnostics instead of being silently resolved.
+
+It is built for review, audit, and inspection—not for rebuilding importable quizzes.
+
+This work also emerged alongside efforts to build a more deliberate and reliable import workflow. Existing Brightspace import paths provide limited control over how quizzes and question banks are reconstructed and placed.
+
+A review-first layer makes it possible to inspect, verify, and reason about quiz structure before attempting import or migration, rather than treating the export as a black box.
+
+This extractor is designed to support that broader workflow, where review and traceability come first, and reconstruction follows from verified structure.
+
+## What It Produces
+
+This project generates three review-first artifacts:
+
+- `quiz_review.xlsx` — primary reviewer workbook
+- `quiz_review.json` — canonical machine-readable output
+- `quiz_review_summary.md` — concise per-quiz summary
+
+The workbook is the primary artifact. JSON is the stable machine-readable output. Markdown is a quick inspection layer.
 
 ## What It Does
 
@@ -17,9 +35,21 @@ Use this extractor when you want to:
 - preserve ambiguous Brightspace structures as diagnostics instead of guessing
 - keep a stable JSON artifact for downstream comparison or automation
 
-The workbook is the primary artifact. JSON is the canonical machine-readable output. Markdown is a concise summary.
+This tool does **not** try to rebuild importable Brightspace quizzes.
 
-## Runtime And Test Prerequisites
+## Quick Start
+
+Create a virtual environment, install the runtime dependency, and run the extractor against an unpacked Brightspace export folder or ZIP:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python brightspace_quiz_review_extractor_v2.py /path/to/export --out ./quiz_review_out
+```
+
+On macOS, you can also run the included `.command` launcher. The CLI works cross-platform.
+
+## Runtime and Test Prerequisites
 
 The script depends on `openpyxl`.
 
@@ -37,76 +67,19 @@ Run tests with:
 .venv/bin/python -m pytest -q
 ```
 
-## Quick Start
+## macOS Convenience Launcher
 
-For source use from GitHub:
+`Run Brightspace Quiz Review Extractor.command` is a double-click launcher for less technical users.
 
-1. Clone or download this repository.
-2. Create a virtual environment.
-3. Install the runtime dependency from `requirements.txt`.
-4. Run the extractor against an unpacked Brightspace export folder or ZIP.
+On first run it:
 
-Minimal setup:
+- creates a local `.venv`
+- installs the runtime dependency from `requirements.txt`
+- prompts for the Brightspace export
+- prompts for the destination folder
+- opens the generated output folder
 
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-```
-
-macOS convenience launcher:
-
-- `Run Brightspace Quiz Review Extractor.command` is a double-click launcher for less technical users.
-- On first run it creates a local `.venv`, installs the runtime dependency from `requirements.txt`, prompts for the Brightspace export, prompts for the destination folder, then opens the generated output folder.
-- It still requires Python 3 to be installed on the Mac.
-
-## Source Repo And Releases
-
-This repository is intended to track source, tests, and the workbook template.
-
-It intentionally does not track:
-
-- local virtual environments such as `.venv`
-- unpacked sample course exports
-- generated review outputs
-- packaged `dist/` bundles
-
-If you want a more plug-and-play download for colleagues, publish the built launcher bundle as a GitHub Release instead of committing `dist/` artifacts to the source repo.
-
-Run on an unpacked export:
-
-```bash
-.venv/bin/python brightspace_quiz_review_extractor_v2.py \
-  /path/to/unpacked_export \
-  --out ./quiz_review_out
-```
-
-Run on a ZIP export:
-
-```bash
-.venv/bin/python brightspace_quiz_review_extractor_v2.py \
-  /path/to/D2LExport.zip \
-  --out ./quiz_review_out
-```
-
-What they need:
-
-- Python 3.10+ recommended
-- the files in this repository
-- a Brightspace export containing `imsmanifest.xml` and `quiz_d2l_*.xml`
-- `questiondb.xml` if their quiz uses banks or pools and they want the best traceability
-
-What they do not need:
-
-- `pytest` unless they want to run tests
-- Excel to generate outputs
-- any database, web server, or extra application stack
-
-If they want to run tests too:
-
-```bash
-.venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest -q
-```
+It still requires Python 3 to be installed on the Mac.
 
 ## Supported Inputs
 
@@ -115,7 +88,27 @@ The extractor accepts either:
 - a Brightspace export ZIP
 - an unpacked Brightspace export folder
 
-The unpacked folder should contain `imsmanifest.xml` and one or more `quiz_d2l_*.xml` files. If `questiondb.xml` is present, the extractor will use it for traceability and bank resolution.
+The unpacked folder should contain:
+
+- `imsmanifest.xml`
+- one or more `quiz_d2l_*.xml` files
+
+If `questiondb.xml` is present, the extractor will use it for traceability and bank resolution.
+
+## What You Need
+
+To run the extractor, you need:
+
+- Python 3.10+ recommended
+- the files in this repository
+- a Brightspace export containing `imsmanifest.xml` and `quiz_d2l_*.xml`
+- `questiondb.xml` if the quiz uses banks or pools and you want the best traceability
+
+You do **not** need:
+
+- `pytest`, unless you want to run tests
+- Excel to generate outputs
+- any database, web server, or extra application stack
 
 ## Outputs
 
@@ -158,6 +151,18 @@ Per-quiz summary including:
 - section and pool counts
 - diagnostic counts and top issue types
 
+## Core Design Principle
+
+The extractor does not guess.
+
+If a relationship, especially bank resolution, is not confident:
+
+- the row stays `inline` or `unresolved`
+- a diagnostic is emitted
+- the source clue is preserved
+
+This is deliberate. Review fidelity is prioritized over forced completeness.
+
 ## Source Model
 
 ### Quiz-level `storage_type`
@@ -195,7 +200,7 @@ The extractor also preserves:
 When `questiondb.xml` is present, the extractor tries to match banked content in this order:
 
 1. stable keys such as label, ident, local ID, display ID, or global ID
-2. title/stem evidence plus question type
+2. title or stem evidence plus question type
 3. quiz-title to bank-section relationship heuristics
 
 If a match is not confident:
@@ -204,7 +209,7 @@ If a match is not confident:
 - a diagnostic is emitted
 - the source clue is preserved
 
-This is deliberate. The extractor prefers explicit uncertainty over silent assumptions.
+This is intentional. The extractor prefers explicit uncertainty over silent assumptions.
 
 ## Question Parsing Coverage
 
@@ -241,7 +246,7 @@ If Brightspace feedback cannot be mapped cleanly, the extractor preserves what i
 
 ## Reviewer-Facing Workbook Fields
 
-The `questions` sheet keeps the raw traceability fields, but now adds reviewer-facing display fields so matching and ordering questions are readable without opening JSON payloads.
+The `questions` sheet keeps the raw traceability fields, but also adds reviewer-facing display fields so matching and ordering questions are readable without opening JSON payloads.
 
 Reviewer-facing additions on question rows:
 
@@ -269,7 +274,7 @@ The `questions` sheet is laid out to support review flow:
 
 ## Matching Review Expansion
 
-The workbook now includes `matching_pairs_expanded`, a reviewer-facing expansion sheet with one row per prompt/match pair.
+The workbook includes `matching_pairs_expanded`, a reviewer-facing expansion sheet with one row per prompt or match pair.
 
 Each row includes:
 
@@ -285,7 +290,7 @@ This sheet is built from the same parsed matching data used for the main `questi
 
 ## Image Handling
 
-The extractor now scans question-level Brightspace XML for image references in:
+The extractor scans question-level Brightspace XML for image references in:
 
 - stem and presentation material
 - answer choice material
@@ -297,7 +302,7 @@ It supports the Brightspace patterns observed in exported quizzes and question b
 - escaped HTML `&lt;img src="..."&gt;` inside `mattext`
 - explicit `matimage` nodes
 
-Question rows now include:
+Question rows include:
 
 - `image_refs`: raw refs as extracted after HTML-unescape
 - `image_paths_resolved`: resolved package-relative file paths
@@ -316,8 +321,8 @@ Optional reviewer-portable asset copies:
 
 ```bash
 .venv/bin/python brightspace_quiz_review_extractor_v2.py \
-  "./Sample_extracted_export_files/APN 605 (Image file example)/D2LExport_17336_APN-505-Master-Template_20210628013018_202631726" \
-  --out ./quiz_review_example_v2 \
+  /path/to/unpacked_export \
+  --out ./quiz_review_out \
   --copy-images-to-assets
 ```
 
@@ -331,7 +336,7 @@ Image-related diagnostics include:
 - `duplicate_image_filename`
 - `image_copy_failed`
 
-## Traceability And Diagnostics
+## Traceability and Diagnostics
 
 Diagnostics are meant for reviewers, not just developers. They use quiz title context and plain language for issues such as:
 
@@ -343,15 +348,9 @@ Diagnostics are meant for reviewers, not just developers. They use quiz title co
 - unresolved or missing image files
 - partially collapsed feedback
 
-`source_map` provides the audit trail from workbook/JSON rows back to the originating XML object and hint.
+`source_map` provides the audit trail from workbook or JSON rows back to the originating XML object and hint.
 
 ## Usage
-
-### Create only the workbook template
-
-```bash
-.venv/bin/python brightspace_quiz_review_extractor_v2.py --template-only --out ./quiz_review_template_v2
-```
 
 ### Run on an unpacked Brightspace export
 
@@ -374,17 +373,55 @@ Diagnostics are meant for reviewers, not just developers. They use quiz title co
 
 ```bash
 .venv/bin/python brightspace_quiz_review_extractor_v2.py \
-  ./D2LExport_example.zip \
+  ./D2LExport.zip \
   --out ./quiz_review_out
 ```
 
+### Create only the workbook template
+
+```bash
+.venv/bin/python brightspace_quiz_review_extractor_v2.py \
+  --template-only \
+  --out ./quiz_review_template_v2
+```
+
+## Source Repo and Releases
+
+This repository is intended to track source, tests, and the workbook template.
+
+It intentionally does **not** track:
+
+- local virtual environments such as `.venv`
+- unpacked sample course exports
+- generated review outputs
+- packaged `dist/` bundles
+
+
+
+## Repository Scope
+
+This repo tracks:
+
+- source code
+- tests
+- workbook template
+
+It does not track:
+
+- `.venv`
+- unpacked exports
+- generated outputs
+- `dist/` bundles
+
+Use GitHub Releases for distributable builds.
+
 ## Limitations
 
-- Images are linked, not embedded, in the workbook.
-- The extractor only surfaces question-level image references. Decorative course-content files outside quiz/question-bank question content remain out of scope.
-- External or unsupported image URLs are preserved as raw refs and diagnosed instead of being rewritten.
-- Fallback filename resolution only succeeds when there is exactly one package match.
-- Ordering reconstruction remains bounded by the semantics Brightspace actually exports. When only partial structure is available, the workbook uses a clear best-effort display and preserves the raw payload.
+- images are linked, not embedded, in the workbook
+- the extractor only surfaces question-level image references; decorative course-content files outside quiz or question-bank content remain out of scope
+- external or unsupported image URLs are preserved as raw refs and diagnosed instead of being rewritten
+- fallback filename resolution only succeeds when there is exactly one package match
+- ordering reconstruction remains bounded by the semantics Brightspace actually exports; when only partial structure is available, the workbook uses a clear best-effort display and preserves the raw payload
 
 ## Regenerating Outputs Locally
 
@@ -411,13 +448,13 @@ This extractor intentionally does **not**:
 
 - generate re-import packages
 - rebuild Brightspace quizzes
-- interpret gradebook/rubric integrations
+- interpret gradebook or rubric integrations
 - add a service, UI, or migration framework
 
 It is a local, review-first parser.
 
 ## Known Heuristics
 
-- Bank-only pool resolution remains heuristic when Brightspace does not expose stable section linkage.
-- Ordering and numeric/arithmetic questions are preserved as best-effort structures when exact semantics are not explicit in export conditions.
-- `question_count_resolved` reflects reviewable question rows, which may include pool candidates when that is the only way to surface question content for review.
+- bank-only pool resolution remains heuristic when Brightspace does not expose stable section linkage
+- ordering and numeric or arithmetic questions are preserved as best-effort structures when exact semantics are not explicit in export conditions
+- `question_count_resolved` reflects reviewable question rows, which may include pool candidates when that is the only way to surface question content for review
