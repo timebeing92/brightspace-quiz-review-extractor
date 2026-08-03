@@ -199,9 +199,16 @@ The extractor also preserves:
 
 When `questiondb.xml` is present, the extractor tries to match banked content in this order:
 
-1. stable keys such as label, ident, local ID, display ID, or global ID
-2. title or stem evidence plus question type
-3. quiz-title to bank-section relationship heuristics
+1. direct quiz `itemref` links into `questiondb.xml`
+2. stable keys such as label, ident, local ID, display ID, or global ID
+3. title or stem evidence plus question type
+4. quiz-title to bank-section relationship heuristics
+
+Direct `itemref` questions are materialized as full review rows, including
+references stored at the root of the Question Library and references inside
+random-draw sections. Pool draw counts remain separate from pool size, so the
+review includes every exported pool candidate rather than only the number drawn
+for one attempt.
 
 If a match is not confident:
 

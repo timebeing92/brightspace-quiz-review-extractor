@@ -577,6 +577,116 @@ def test_question_bank_matching_supports_exact_ambiguous_and_none(tmp_path: Path
     assert none_match["status"] == "none"
 
 
+def test_create_review_outputs_resolves_fixed_and_pooled_itemrefs(tmp_path: Path):
+    export_root = tmp_path / "itemref_export"
+    export_root.mkdir()
+    (export_root / "imsmanifest.xml").write_text("<manifest/>", encoding="utf-8")
+    (export_root / "questiondb.xml").write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<questestinterop>
+  <objectbank ident="MIXED_BANK">
+    <item ident="ROOT_OBJECT" label="ROOT_Q" title="Root item">
+      <itemmetadata><qtimetadata>
+        <qti_metadatafield><fieldlabel>qmd_questiontype</fieldlabel><fieldentry>Short Answer</fieldentry></qti_metadatafield>
+        <qti_metadatafield><fieldlabel>qmd_weighting</fieldlabel><fieldentry>1</fieldentry></qti_metadatafield>
+      </qtimetadata></itemmetadata>
+      <presentation><material><mattext>Root prompt</mattext></material><response_str ident="ROOT_STR"><render_fib /></response_str></presentation>
+      <resprocessing><respcondition><conditionvar><varequal respident="ROOT_STR">root</varequal></conditionvar><setvar>100</setvar></respcondition></resprocessing>
+    </item>
+    <section ident="SECTION_BANK" title="Section Bank">
+      <item ident="SECTION_OBJECT" label="SECTION_Q" title="Section item">
+        <itemmetadata><qtimetadata>
+          <qti_metadatafield><fieldlabel>qmd_questiontype</fieldlabel><fieldentry>Short Answer</fieldentry></qti_metadatafield>
+          <qti_metadatafield><fieldlabel>qmd_weighting</fieldlabel><fieldentry>2</fieldentry></qti_metadatafield>
+        </qtimetadata></itemmetadata>
+        <presentation><material><mattext>Section prompt</mattext></material><response_str ident="SECTION_STR"><render_fib /></response_str></presentation>
+        <resprocessing><respcondition><conditionvar><varequal respident="SECTION_STR">section</varequal></conditionvar><setvar>100</setvar></respcondition></resprocessing>
+      </item>
+    </section>
+  </objectbank>
+</questestinterop>
+""",
+        encoding="utf-8",
+    )
+    (export_root / "quiz_d2l_mixed.xml").write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<questestinterop xmlns:d2l_2p0="http://desire2learn.com/xsd/d2lcp_v2p0">
+  <assessment ident="MIXED_QUIZ" title="Mixed storage fixture">
+    <section ident="CONTAINER_SECTION">
+      <section ident="FIXED" title="Fixed references">
+        <itemref linkrefid="ROOT_Q"><d2l_2p0:file href="questiondb.xml" /><d2l_2p0:points>1</d2l_2p0:points></itemref>
+      </section>
+      <section ident="RAND_SECTION" title="Random reference">
+        <qtimetadata><qti_metadatafield><fieldlabel>qmd_numberofitems</fieldlabel><fieldentry>1</fieldentry></qti_metadatafield></qtimetadata>
+        <itemref linkrefid="SECTION_Q"><d2l_2p0:file href="questiondb.xml" /><d2l_2p0:points>2</d2l_2p0:points></itemref>
+      </section>
+      <section ident="INLINE" title="Inline local item">
+        <item ident="INLINE_OBJECT" label="INLINE_Q" title="Inline item">
+          <itemmetadata><qtimetadata><qti_metadatafield><fieldlabel>qmd_questiontype</fieldlabel><fieldentry>Short Answer</fieldentry></qti_metadatafield></qtimetadata></itemmetadata>
+          <presentation><material><mattext>Inline prompt</mattext></material><response_str ident="INLINE_STR"><render_fib /></response_str></presentation>
+        </item>
+      </section>
+    </section>
+  </assessment>
+</questestinterop>
+""",
+        encoding="utf-8",
+    )
+
+    output_root = tmp_path / "review"
+    extractor.create_review_outputs(export_root, output_root)
+    data = json.loads((output_root / "quiz_review.json").read_text(encoding="utf-8"))
+    questions = {row["question_id"]: row for row in data["questions"]}
+
+    assert set(questions) == {"ROOT_Q", "SECTION_Q", "INLINE_Q"}
+    assert questions["ROOT_Q"]["source_location"] == "questiondb"
+    assert questions["SECTION_Q"]["source_location"] == "questiondb"
+    assert questions["SECTION_Q"]["points"] == 2
+    assert questions["INLINE_Q"]["source_location"] == "inline"
+    assert "itemref[ROOT_Q]" in questions["ROOT_Q"]["source_hint"]
+    assert "itemref[SECTION_Q]" in questions["SECTION_Q"]["source_hint"]
+    assert [row["question_id"] for row in data["pool_members"]] == ["SECTION_Q"]
+
+
+def test_create_review_outputs_includes_every_candidate_when_pool_draws_subset(tmp_path: Path):
+    export_root = tmp_path / "pooled_export"
+    export_root.mkdir()
+    bank_items = "".join(
+        f"""
+      <item ident="Q{i}" label="Q{i}" title="Question {i}">
+        <itemmetadata><qtimetadata>
+          <qti_metadatafield><fieldlabel>qmd_questiontype</fieldlabel><fieldentry>Short Answer</fieldentry></qti_metadatafield>
+          <qti_metadatafield><fieldlabel>qmd_weighting</fieldlabel><fieldentry>1</fieldentry></qti_metadatafield>
+        </qtimetadata></itemmetadata>
+        <presentation><material><mattext>Question {i}</mattext></material><response_str ident="R{i}"><render_fib /></response_str></presentation>
+      </item>
+"""
+        for i in range(1, 6)
+    )
+    (export_root / "questiondb.xml").write_text(
+        f"<questestinterop><objectbank ident=\"BANK\"><section ident=\"POOL_1\" title=\"Pool 1\">{bank_items}</section></objectbank></questestinterop>",
+        encoding="utf-8",
+    )
+    (export_root / "quiz_d2l_pool.xml").write_text(
+        """<questestinterop><assessment ident="QUIZ" title="Pooled Quiz"><section ident="CONTAINER_SECTION">
+          <section ident="POOL_1" title="Pool 1"><qtimetadata><qti_metadatafield>
+            <fieldlabel>qmd_numberofitems</fieldlabel><fieldentry>2</fieldentry>
+          </qti_metadatafield></qtimetadata></section>
+        </section></assessment></questestinterop>""",
+        encoding="utf-8",
+    )
+    (export_root / "imsmanifest.xml").write_text("<manifest/>", encoding="utf-8")
+
+    output_root = tmp_path / "review"
+    extractor.create_review_outputs(export_root, output_root)
+    data = json.loads((output_root / "quiz_review.json").read_text(encoding="utf-8"))
+
+    assert data["sections_pools"][0]["draw_count"] == "2"
+    assert data["sections_pools"][0]["pool_size"] == 5
+    assert {row["question_id"] for row in data["questions"]} == {"Q1", "Q2", "Q3", "Q4", "Q5"}
+    assert len(data["pool_members"]) == 5
+
+
 def test_create_review_outputs_adds_image_columns_and_hyperlinks(tmp_path: Path):
     export_root = create_minimal_export(
         tmp_path,

@@ -11,6 +11,8 @@
 
 ### Source classification and bank resolution
 
+- Added direct `itemref` resolution from quiz XML into `questiondb.xml`, including root-level Question Library items and pooled references.
+- Preserved item-reference point overrides and materialized each resolved reference as a full question row.
 - Fixed `storage_type` so it is based on resolved quiz/question sources instead of `questiondb.xml` presence alone.
 - Standardized row-level `source_location` values to `inline`, `hybrid`, `questiondb`, and `unresolved`.
 - Added explicit diagnostics for ambiguous bank matches and unresolved bank-backed pool sections.

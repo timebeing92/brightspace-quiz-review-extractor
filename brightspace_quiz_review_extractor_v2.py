@@ -1596,6 +1596,35 @@ class QuestionBank:
             "reason": "multiple bank candidates had similar title/stem evidence",
         }
 
+    def match_itemref(self, itemref: ET.Element) -> Dict[str, Any]:
+        linkrefid = itemref.attrib.get("linkrefid", "").strip()
+        file_ref = next((node for node in itemref.iter() if local_name(node.tag) == "file"), None)
+        href = file_ref.attrib.get("href", "").strip() if file_ref is not None else ""
+        if href and Path(href).name.lower() != "questiondb.xml":
+            return {
+                "status": "none",
+                "reason": f"itemref points to '{href}', not questiondb.xml",
+            }
+
+        candidates = list(self.records_by_exact_key.get(linkrefid, [])) if linkrefid else []
+        candidates = list({id(candidate): candidate for candidate in candidates}.values())
+        if len(candidates) == 1:
+            return {
+                "status": "matched",
+                "record": candidates[0],
+                "reason": "direct itemref linkrefid match",
+            }
+        if len(candidates) > 1:
+            return {
+                "status": "ambiguous",
+                "records": candidates,
+                "reason": "itemref linkrefid matched multiple questiondb items",
+            }
+        return {
+            "status": "none",
+            "reason": f"itemref linkrefid '{linkrefid}' was not found in questiondb.xml",
+        }
+
     def resolve_bank_section(self, section_ident: str, section_title: str, quiz_title: str) -> Dict[str, Any]:
         if section_ident in self.section_items:
             return {
@@ -1651,6 +1680,65 @@ def parse_questiondb(root: Optional[Path], file_index: Optional[Dict[str, Any]] 
     if objectbank is None:
         return bank, source_map
 
+    def add_bank_items(
+        items: Iterable[ET.Element],
+        *,
+        section_ident: str,
+        section_title: str,
+        source_hint: str,
+    ) -> None:
+        for item in items:
+            row, item_diagnostics = parse_item(
+                item,
+                "questiondb",
+                "",
+                "questiondb.xml",
+                source_hint,
+            )
+            row["source_hint"] = source_hint
+            if file_index is not None:
+                item_diagnostics.extend(
+                    populate_row_image_fields(row, file_index=file_index, source_file="questiondb.xml")
+                )
+            bank.add_item(row, item, section_ident, section_title, item_diagnostics)
+            source_map.append(
+                make_source_map_row(
+                    object_type="questiondb_item",
+                    object_id=row["question_id"],
+                    object_title=row["question_title"],
+                    quiz_id="",
+                    quiz_title="",
+                    source_file="questiondb.xml",
+                    source_hint=source_hint,
+                    resolved_to_sheet="questions",
+                    resolved_to_key=row["question_id"],
+                )
+            )
+
+    root_items = [child for child in list(objectbank) if local_name(child.tag) == "item"]
+    if root_items:
+        root_ident = objectbank.attrib.get("ident", "") or "OBJECTBANK_ROOT"
+        root_title = "Question Library Root Items"
+        source_map.append(
+            make_source_map_row(
+                object_type="questiondb_section",
+                object_id=root_ident,
+                object_title=root_title,
+                quiz_id="",
+                quiz_title="",
+                source_file="questiondb.xml",
+                source_hint="objectbank/item",
+                resolved_to_sheet="pool_members",
+                resolved_to_key=root_ident,
+            )
+        )
+        add_bank_items(
+            root_items,
+            section_ident=root_ident,
+            section_title=root_title,
+            source_hint="objectbank/item",
+        )
+
     for section in objectbank.findall("./section"):
         section_ident = section.attrib.get("ident", "")
         section_title = section.attrib.get("title", "")
@@ -1667,31 +1755,12 @@ def parse_questiondb(root: Optional[Path], file_index: Optional[Dict[str, Any]] 
                 resolved_to_key=section_ident,
             )
         )
-        for item in section.findall("./item"):
-            row, diagnostics = parse_item(
-                item,
-                "questiondb",
-                "",
-                "questiondb.xml",
-                f"objectbank/section[{section_ident}]/item",
-            )
-            row["source_hint"] = f"objectbank/section[{section_ident}]/item"
-            if file_index is not None:
-                diagnostics.extend(populate_row_image_fields(row, file_index=file_index, source_file="questiondb.xml"))
-            bank.add_item(row, item, section_ident, section_title, diagnostics)
-            source_map.append(
-                make_source_map_row(
-                    object_type="questiondb_item",
-                    object_id=row["question_id"],
-                    object_title=row["question_title"],
-                    quiz_id="",
-                    quiz_title="",
-                    source_file="questiondb.xml",
-                    source_hint=f"objectbank/section[{section_ident}]/item",
-                    resolved_to_sheet="questions",
-                    resolved_to_key=row["question_id"],
-                )
-            )
+        add_bank_items(
+            section.findall("./item"),
+            section_ident=section_ident,
+            section_title=section_title,
+            source_hint=f"objectbank/section[{section_ident}]/item",
+        )
     return bank, source_map
 
 
@@ -1703,6 +1772,13 @@ def get_child_sections(container: Optional[ET.Element]) -> List[ET.Element]:
 
 def copy_bank_record(record: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
     return dict(record["row"]), [dict(diag) for diag in record["diagnostics"]]
+
+
+def itemref_points(itemref: ET.Element, fallback: Any = "") -> Any:
+    points = next((node for node in itemref.iter() if local_name(node.tag) == "points"), None)
+    if points is not None and (points.text or "").strip():
+        return format_number(parse_number(points.text))
+    return fallback
 
 
 def annotate_missing_assets(
@@ -1823,7 +1899,11 @@ def analyze_quiz(
         metadata = qti_metadata(section)
         section_type = "pool" if section_ident.startswith("RAND_") or metadata.get("qmd_numberofitems") else "section"
         draw_count = metadata.get("qmd_numberofitems", "") if section_type == "pool" else ""
-        items = section.findall("./item")
+        question_nodes = [
+            child
+            for child in list(section)
+            if local_name(child.tag) in {"item", "itemref"}
+        ]
 
         section_row = {
             "quiz_id": quiz_id,
@@ -1858,15 +1938,63 @@ def analyze_quiz(
         resolved_section_questions: List[Dict[str, Any]] = []
         resolved_section_diags: List[Dict[str, str]] = []
 
-        if items:
-            for question_order, item in enumerate(items, start=1):
-                row, item_diags = parse_item(
-                    item,
-                    "inline",
-                    quiz_path.name,
-                    "",
-                    f"assessment/section[{section_ident}]/item",
-                )
+        if question_nodes:
+            for question_order, question_node in enumerate(question_nodes, start=1):
+                is_itemref = local_name(question_node.tag) == "itemref"
+                if is_itemref:
+                    linkrefid = question_node.attrib.get("linkrefid", "").strip()
+                    match = bank.match_itemref(question_node) if bank.records else {
+                        "status": "none",
+                        "reason": "questiondb.xml is missing or contains no indexed questions",
+                    }
+                    if match["status"] == "matched":
+                        row, item_diags = copy_bank_record(match["record"])
+                        row.update(
+                            {
+                                "source_location": "questiondb",
+                                "source_quiz_file": quiz_path.name,
+                                "source_bank_file": "questiondb.xml",
+                                "source_hint": (
+                                    f"assessment/section[{section_ident}]/itemref[{linkrefid}] "
+                                    f"resolved via {match['reason']}"
+                                ),
+                                "points": itemref_points(question_node, row.get("points", "")),
+                            }
+                        )
+                    else:
+                        placeholder = ET.Element(
+                            "item",
+                            {
+                                "label": linkrefid,
+                                "title": "(unresolved Question Library reference)",
+                            },
+                        )
+                        row = build_base_row(
+                            placeholder,
+                            "unresolved",
+                            quiz_path.name,
+                            "questiondb.xml" if bank.records else "",
+                            f"assessment/section[{section_ident}]/itemref[{linkrefid}]",
+                        )
+                        row["points"] = itemref_points(question_node, "")
+                        item_diags = [
+                            diagnostic_seed(
+                                "unresolved_itemref",
+                                f"Question Library reference '{linkrefid}' could not be resolved: {match['reason']}.",
+                                question_id=linkrefid,
+                                source_file=quiz_path.name,
+                                source_hint=row["source_hint"],
+                                suggested_action="Keep questiondb.xml with the export and review this reference manually.",
+                            )
+                        ]
+                else:
+                    row, item_diags = parse_item(
+                        question_node,
+                        "inline",
+                        quiz_path.name,
+                        "",
+                        f"assessment/section[{section_ident}]/item",
+                    )
                 row.update(
                     {
                         "quiz_id": quiz_id,
@@ -1876,10 +2004,18 @@ def analyze_quiz(
                         "question_order": question_order,
                     }
                 )
-                item_diags.extend(populate_row_image_fields(row, file_index=file_index, source_file=quiz_path.name))
+                if not (is_itemref and match["status"] == "matched"):
+                    item_diags.extend(
+                        populate_row_image_fields(row, file_index=file_index, source_file=quiz_path.name)
+                    )
 
-                match = bank.match_inline_item(item, row, quiz_title) if bank.records else {"status": "none"}
-                if match["status"] == "matched":
+                match = (
+                    bank.match_inline_item(question_node, row, quiz_title)
+                    if not is_itemref and bank.records
+                    else match if is_itemref
+                    else {"status": "none"}
+                )
+                if not is_itemref and match["status"] == "matched":
                     record = match["record"]
                     row["source_location"] = "hybrid"
                     row["source_bank_file"] = "questiondb.xml"
@@ -1900,7 +2036,7 @@ def analyze_quiz(
                             resolved_to_key=row["question_id"],
                         )
                     )
-                elif match["status"] == "ambiguous":
+                elif not is_itemref and match["status"] == "ambiguous":
                     item_diags.append(
                         diagnostic_seed(
                             "ambiguous_bank_match",
@@ -1935,7 +2071,7 @@ def analyze_quiz(
                 resolved_section_questions.append(row)
                 source_map.append(
                     make_source_map_row(
-                        object_type="quiz_item",
+                        object_type="quiz_itemref" if is_itemref else "quiz_item",
                         object_id=row["question_id"],
                         object_title=row["question_title"],
                         quiz_id=quiz_id,
